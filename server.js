@@ -1,38 +1,73 @@
 const express = require('express');
-const fs = require('fs');
-const path = require('path');
 const bodyParser = require('body-parser');
 const cors = require('cors');
+const mongoose = require('mongoose');
+require('dotenv').config();
 
 const app = express();
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 5001;
 
 app.use(cors());
 app.use(bodyParser.json());
 
-const filePath = path.join(__dirname, 'calendarState.json');
+// MongoDB Connection
+const mongoURI = process.env.MONGODB_URI; // You'll need to add this to your .env file
+// Remove useNewUrlParser and useUnifiedTopology
+mongoose.connect(mongoURI)
+    .then(() => console.log('Connected to MongoDB'))
+    .catch(err => console.error('MongoDB connection error:', err));
+
+
+// Create Schema for calendar state
+const CalendarStateSchema = new mongoose.Schema({
+    // This will store your entire calendar state as an object
+    state: {
+        type: Object,
+        required: true
+    },
+    lastUpdated: {
+        type: Date,
+        default: Date.now
+    }
+});
+
+// Create model
+const CalendarState = mongoose.model('CalendarState', CalendarStateSchema);
 
 // Endpoint to get the current state
-app.get('/calendarState', (req, res) => {
-  fs.readFile(filePath, 'utf8', (err, data) => {
-    if (err) {
-      return res.status(500).send('Error reading file');
+app.get('/calendarState', async (req, res) => {
+    try {
+        const state = await CalendarState.findOne();
+        if (!state) {
+            // If no state exists, return empty object or default state
+            return res.json({});
+        }
+        res.json(state.state);
+    } catch (err) {
+        console.error('Error reading state:', err);
+        res.status(500).send('Error reading state from database');
     }
-    res.send(JSON.parse(data));
-  });
 });
 
 // Endpoint to update the state
-app.post('/updateCalendarState', (req, res) => {
-  const newState = req.body;
-  fs.writeFile(filePath, JSON.stringify(newState, null, 2), 'utf8', (err) => {
-    if (err) {
-      return res.status(500).send('Error writing file');
+app.post('/updateCalendarState', async (req, res) => {
+    try {
+        const newState = req.body;
+        await CalendarState.findOneAndUpdate(
+            {}, // empty filter to update first document
+            { 
+                state: newState,
+                lastUpdated: new Date()
+            },
+            { upsert: true, new: true } // create if doesn't exist, return updated doc
+        );
+        res.send('State updated successfully');
+    } catch (err) {
+        console.error('Error updating state:', err);
+        res.status(500).send('Error updating state in database');
     }
-    res.send('State updated successfully');
-  });
 });
 
 app.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
+    console.log(`Server is running on port ${PORT}`);
 });
